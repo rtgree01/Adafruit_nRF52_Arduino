@@ -92,15 +92,15 @@ feather52840.build.variant=feather_nrf52840_express
 feather52840.build.usb_manufacturer="Adafruit LLC"
 feather52840.build.usb_product="Feather nRF52840 Express"
 feather52840.build.extra_flags=-DNRF52840_XXAA {build.flags.usb}
-feather52840.build.ldscript=nrf52840_s140_v6.ld
+feather52840.build.ldscript=nrf52840_s340_v6.ld
 feather52840.build.vid=0x239A
 feather52840.build.pid=0x8029
 
 # SofDevice Menu
-feather52840.menu.softdevice.s140v6=0.2.13 SoftDevice s140 6.1.1
-feather52840.menu.softdevice.s140v6.build.sd_name=s140
-feather52840.menu.softdevice.s140v6.build.sd_version=6.1.1
-feather52840.menu.softdevice.s140v6.build.sd_fwid=0x00B6
+feather52840.menu.softdevice.s340v6=0.3.0 SoftDevice s340 6.1.1
+feather52840.menu.softdevice.s340v6.build.sd_name=s340
+feather52840.menu.softdevice.s340v6.build.sd_version=6.1.1
+feather52840.menu.softdevice.s340v6.build.sd_fwid=0x00B9
 
 # Debug Menu
 feather52840.menu.debug.l0=Level 0 (Release)

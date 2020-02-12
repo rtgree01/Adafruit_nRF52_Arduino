@@ -53,6 +53,12 @@
 #define CFG_SOC_TASK_STACKSIZE    (200)
 #endif
 
+#ifndef CFG_ANT_TASK_STACKSIZE
+#define CFG_ANT_TASK_STACKSIZE    (256*5)
+#endif
+
+
+
 #ifdef USE_TINYUSB
 #include "nrfx_power.h"
 
@@ -90,6 +96,7 @@ extern "C"
 void flash_nrf5x_event_cb (uint32_t event) ATTR_WEAK;
 }
 
+void adafruit_ant_task(void* arg);
 void adafruit_ble_task(void* arg);
 void adafruit_soc_task(void* arg);
 
@@ -160,6 +167,7 @@ AdafruitBluefruit::AdafruitBluefruit(void)
 
   memclr(_connection, sizeof(_connection));
 
+  _ant_event_sem = NULL;
   _ble_event_sem = NULL;
   _soc_event_sem = NULL;
 
@@ -170,7 +178,8 @@ AdafruitBluefruit::AdafruitBluefruit(void)
 
   _conn_hdl      = BLE_CONN_HANDLE_INVALID;
 
-  _event_cb = NULL;
+  _ble_event_cb = NULL;
+  _ant_event_cb = NULL;
   _rssi_cb = NULL;
 
   _sec_param = ((ble_gap_sec_params_t)
@@ -283,10 +292,12 @@ void AdafruitBluefruit::configCentralBandwidth(uint8_t bw)
   }
 }
 
-bool AdafruitBluefruit::begin(uint8_t prph_count, uint8_t central_count)
+bool AdafruitBluefruit::begin(uint8_t prph_count, uint8_t central_count, uint8_t ant_count)
 {
   _prph_count    = prph_count;
   _central_count = central_count;
+
+  bool ble_enabled = (_prph_count != 0) || (_central_count != 0);
 
 #ifdef USE_TINYUSB
   usb_softdevice_pre_enable();
@@ -315,7 +326,27 @@ bool AdafruitBluefruit::begin(uint8_t prph_count, uint8_t central_count)
   #error Clock Source is not configured, define USE_LFXO or USE_LFRC according to your board in variant.h
 #endif
 
-  VERIFY_STATUS( sd_softdevice_enable(&clock_cfg, nrf_error_cb), false );
+  VERIFY_STATUS( sd_softdevice_enable(&clock_cfg, nrf_error_cb, ANT_LICENSE_KEY), false );
+
+
+
+   if (ant_count != 0)
+   {
+      m_ant_stack_buffer = (uint8_t*)malloc(ANT_ENABLE_GET_REQUIRED_SPACE(ant_count, 0, 128, 64));
+
+      ANT_ENABLE ant_enable_cfg =
+      {
+         .ucTotalNumberOfChannels     = ant_count,
+         .ucNumberOfEncryptedChannels = 0,
+         .usNumberOfEvents            = 64,
+         .pucMemoryBlockStartLocation = m_ant_stack_buffer,
+         .usMemoryBlockByteSize       = ANT_ENABLE_GET_REQUIRED_SPACE(ant_count, 0, 128, 64),
+      };
+
+      VERIFY_STATUS( sd_ant_enable(&ant_enable_cfg), false);   
+   }
+
+
 
 #ifdef USE_TINYUSB
   usb_softdevice_post_enable();
@@ -341,6 +372,8 @@ bool AdafruitBluefruit::begin(uint8_t prph_count, uint8_t central_count)
    */
   /*------------------------------------------------------------------*/
 
+   if (ble_enabled)
+   {
   /*------------- Configure BLE params  -------------*/
   extern uint32_t  __data_start__[]; // defined in linker
   uint32_t ram_start = (uint32_t) __data_start__;
@@ -457,7 +490,34 @@ bool AdafruitBluefruit::begin(uint8_t prph_count, uint8_t central_count)
   // Default device name
   ble_gap_conn_sec_mode_t sec_mode = BLE_SECMODE_OPEN;
   VERIFY_STATUS(sd_ble_gap_device_name_set(&sec_mode, (uint8_t const *) CFG_DEFAULT_NAME, strlen(CFG_DEFAULT_NAME)), false);
+   }
 
+   if (ant_count != 0)
+   {   
+      memset(m_ant_plus_network_key, 0, 8);
+      #ifdef ANT_PLUS_NETWORK_KEY
+         uint8_t ant_plus_network_key[] = ANT_PLUS_NETWORK_KEY;
+         memcpy(m_ant_plus_network_key, ant_plus_network_key, 8);
+      #endif
+      sd_ant_network_address_set(0, m_ant_plus_network_key);
+      
+      // memset(m_ant_fs_network_key, 0, 8);
+      // #ifdef ANT_FS_NETWORK_KEY
+      //    uint8_t ant_fs_network_key[] = ANT_FS_NETWORK_KEY;
+      //    memcpy(m_ant_fs_network_key, ant_fs_network_key, 8);
+      //    sd_ant_network_address_set(0, m_ant_fs_network_key);
+      // #endif
+
+
+
+      uint8_t channel = 0;
+      // do setup of registered profiles
+      for (ANTProfileEntry* entry = m_profile_list.m_head; entry != NULL; entry = entry->m_next)
+      {
+         entry->m_entry->Setup(channel);
+         channel++;
+      }
+   }
   //------------- USB -------------//
 #ifdef USE_TINYUSB
   sd_power_usbdetected_enable(true);
@@ -465,6 +525,18 @@ bool AdafruitBluefruit::begin(uint8_t prph_count, uint8_t central_count)
   sd_power_usbremoved_enable(true);
 #endif
 
+   if (ant_count != 0)
+   {
+      // Create RTOS Semaphore & Task for ANT Event
+      _ant_event_sem = xSemaphoreCreateBinary();
+      VERIFY(_ant_event_sem);
+
+      TaskHandle_t ant_task_hdl;
+      xTaskCreate( adafruit_ant_task, "ANT", CFG_ANT_TASK_STACKSIZE, NULL, TASK_PRIO_HIGH, &ant_task_hdl);
+   }
+
+   if (ble_enabled)
+   {
   // Init Central role
   if (_central_count)  Central.begin();
 
@@ -474,6 +546,7 @@ bool AdafruitBluefruit::begin(uint8_t prph_count, uint8_t central_count)
 
   TaskHandle_t ble_task_hdl;
   xTaskCreate( adafruit_ble_task, "BLE", CFG_BLE_TASK_STACKSIZE, NULL, TASK_PRIO_HIGH, &ble_task_hdl);
+   }
 
   // Create RTOS Semaphore & Task for SOC Event
   _soc_event_sem = xSemaphoreCreateBinary();
@@ -484,11 +557,14 @@ bool AdafruitBluefruit::begin(uint8_t prph_count, uint8_t central_count)
 
   NVIC_EnableIRQ(SD_EVT_IRQn); // enable SD interrupt
 
+   if (ble_enabled)
+   {
   // Create Timer for led advertising blinky
   _led_blink_th = xTimerCreate(NULL, ms2tick(CFG_ADV_BLINKY_INTERVAL/2), true, NULL, bluefruit_blinky_cb);
 
   // Initialize bonding
   bond_init();
+   }
 
   return true;
 }
@@ -623,9 +699,14 @@ bool AdafruitBluefruit::disconnect(uint16_t conn_hdl)
   return true; // not connected still return true
 }
 
-void AdafruitBluefruit::setEventCallback ( void (*fp) (ble_evt_t*) )
+void AdafruitBluefruit::setBLEEventCallback ( void (*fp) (ble_evt_t*) )
 {
-  _event_cb = fp;
+   _ble_event_cb = fp;
+}
+
+void AdafruitBluefruit::setANTEventCallback ( void (*fp) (ant_evt_t*) )
+{
+   _ant_event_cb = fp;
 }
 
 uint16_t AdafruitBluefruit::connHandle(void)
@@ -681,6 +762,7 @@ void SD_EVT_IRQHandler(void)
   // Notify both BLE & SOC Task
   xSemaphoreGiveFromISR(Bluefruit._soc_event_sem, NULL);
   xSemaphoreGiveFromISR(Bluefruit._ble_event_sem, NULL);
+  xSemaphoreGiveFromISR(Bluefruit._ant_event_sem, NULL);
 }
 
 /**
@@ -921,8 +1003,50 @@ void AdafruitBluefruit::_ble_handler(ble_evt_t* evt)
   Gatt._eventHandler(evt);
 
   // User callback if set
-  if (_event_cb) _event_cb(evt);
+  if (_ble_event_cb) _ble_event_cb(evt);
 }
+
+/*------------------------------------------------------------------*/
+/* ANT Event handler
+ *------------------------------------------------------------------*/
+void adafruit_ant_task(void* arg)
+{
+   (void) arg;
+
+   // malloc buffered is algined by 4
+   ant_evt_t * ant_evt = (ant_evt_t*) rtos_malloc(sizeof(ant_evt_t));
+
+   while (1)
+   {
+      if ( xSemaphoreTake(Bluefruit._ant_event_sem, portMAX_DELAY) )
+      {
+         uint32_t ret = sd_ant_event_get(&ant_evt->channel, &ant_evt->event, ant_evt->message.aucMessage);
+
+         if (ret == NRF_SUCCESS)
+         {
+            Bluefruit._ant_handler(  ant_evt );
+         }
+      }
+   }
+}
+
+/**
+ * ANT event handler
+ * @param evt event
+ */
+void AdafruitBluefruit::_ant_handler(ant_evt_t* evt)
+{
+   for (ANTProfileEntry* entry = m_profile_list.m_head; entry != NULL; entry = entry->m_next)
+   {
+      entry->m_entry->ProcessMessage(evt);
+   }
+}
+
+void AdafruitBluefruit::AddProfile(ANTProfile* p)
+{
+   m_profile_list.AddProfile(p);
+}
+
 
 /*------------------------------------------------------------------*/
 /* Internal Connection LED

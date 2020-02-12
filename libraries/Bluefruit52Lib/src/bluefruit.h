@@ -69,6 +69,13 @@
 
 #include "utility/AdaCallback.h"
 #include "utility/bonding.h"
+#include "ant/ANTProfile.h"
+#ifndef ANT_PLUS_NETWORK_KEY
+    #define ANT_PLUS_NETWORK_KEY    {0, 0, 0, 0, 0, 0, 0, 0}            /**< The ANT+ network key. */
+#endif //ANT_PLUS_NETWORK_KEY
+#ifndef ANT_FS_NETWORK_KEY
+    #define ANT_FS_NETWORK_KEY      {0, 0, 0, 0, 0, 0, 0, 0}           /**< The ANT-FS network key. */
+#endif // ANT_FS_NETWORK_KEY
 
 enum
 {
@@ -123,7 +130,7 @@ class AdafruitBluefruit
     void configPrphBandwidth   (uint8_t bw);
     void configCentralBandwidth(uint8_t bw);
 
-    bool begin(uint8_t prph_count = 1, uint8_t central_count = 0);
+    bool begin(uint8_t prph_count = 1, uint8_t central_count = 0, uint8_t ant_count = 0);
 
     /*------------------------------------------------------------------*/
     /* General Functions
@@ -175,7 +182,8 @@ class AdafruitBluefruit
     /* Callbacks
      *------------------------------------------------------------------*/
     void setRssiCallback(rssi_callback_t fp);
-    void setEventCallback( void (*fp) (ble_evt_t*) );
+    void setBLEEventCallback( void (*fp) (ble_evt_t*) );
+    void setANTEventCallback( void (*fp) (ant_evt_t*) );
 
     COMMENT_OUT ( bool setPIN(const char* pin); )
 
@@ -189,6 +197,8 @@ class AdafruitBluefruit
     void _setConnLed   (bool on_off);
 
     void printInfo(void);
+
+   void AddProfile(ANTProfile* p);
 
   private:
     /*------------- SoftDevice Configuration -------------*/
@@ -213,6 +223,7 @@ class AdafruitBluefruit
 
     ble_gap_sec_params_t _sec_param;
 
+    SemaphoreHandle_t _ant_event_sem;
     SemaphoreHandle_t _ble_event_sem;
     SemaphoreHandle_t _soc_event_sem;
 
@@ -224,7 +235,16 @@ class AdafruitBluefruit
     BLEConnection* _connection[BLE_MAX_CONNECTION];
 
     rssi_callback_t _rssi_cb;
-    void (*_event_cb) (ble_evt_t*);
+    void (*_ant_event_cb) (ant_evt_t*);
+    void (*_ble_event_cb) (ble_evt_t*);
+
+   uint8_t m_ant_plus_network_key[8];
+   uint8_t m_ant_fs_network_key[8];
+
+   ANTProfileList m_profile_list;
+   // Memory buffer provided in order to support channel configuration.
+   __ALIGN(4) uint8_t* m_ant_stack_buffer;
+
 
 COMMENT_OUT(
     uint8_t _auth_type;
@@ -234,9 +254,11 @@ COMMENT_OUT(
     /*------------------------------------------------------------------*/
     /* INTERNAL USAGE ONLY
      *------------------------------------------------------------------*/
+    void _ant_handler(ant_evt_t* evt);
     void _ble_handler(ble_evt_t* evt);
 
     friend void SD_EVT_IRQHandler(void);
+    friend void adafruit_ant_task(void* arg);
     friend void adafruit_ble_task(void* arg);
     friend void adafruit_soc_task(void* arg);
     friend class BLECentral;
