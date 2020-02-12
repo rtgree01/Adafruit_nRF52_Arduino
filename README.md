@@ -1,5 +1,18 @@
 # Arduino Core for Adafruit Bluefruit nRF52 Boards
 
+## This fork of the Arduino Core adds ANT+ functionality
+- There are a few prerequisites:
+1. Obtain the softdevice from [thisisant.com](https://www.thisisant.com)
+2. Rebuild the bootloader. See helpful info [here](http://orrmany.hu/wiki/doku.php?id=s340_softdevice_adafruit_nrf52840_feather_express)
+3. Create a project in PlatformIO. Specify this option in the platformio.ini file: 
+```
+platform_packages = framework-arduinoadafruitnrf52 @ https://github.com/rtgree01/Adafruit_nRF52_Arduino.git#add_ant
+```
+4. Copy the bootloader .hex and .zip files to the newly created directory in your system's default platformio/packages/framework-arduinoadafruitnrf52@src-9ea59e5b56320711578bf5d0161bf395/bootloader/feather_nrf52840_express/ directory
+5. Copy the API files into your system's default platformio/packages/framework-arduinoadafruitnrf52@src-9ea59e5b56320711578bf5d0161bf395/cores/nRF5/nordic/softdevice/s340_nrf52_6.1.1_API/
+6. Build your project.
+
+
 This repository contains the Arduino BSP for Adafruit Bluefruit nRF52 series:
 
 - [Adafruit Feather nRF52832](https://www.adafruit.com/product/3406)
